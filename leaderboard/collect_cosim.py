@@ -447,6 +447,7 @@ class LeaderboardCosim(object):
             scenario.remove_all_actors()
 
             self._cleanup()
+            self.synchronization.close()
 
         except Exception as e:
             print("\n\033[91mFailed to stop the scenario, the statistics might be empty:")
