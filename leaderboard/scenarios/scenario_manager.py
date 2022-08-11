@@ -26,6 +26,9 @@ from leaderboard.autoagents.agent_wrapper import AgentWrapper, AgentError
 from leaderboard.envs.sensor_interface import SensorReceivedNoData
 from leaderboard.utils.result_writer import ResultOutputProvider
 
+from sumo_integration.bridge_helper import BridgeHelper  # pylint: disable=wrong-import-position
+from sumo_integration.constants import INVALID_ACTOR_ID  # pylint: disable=wrong-import-position
+
 
 class ScenarioManager(object):
 
@@ -154,6 +157,7 @@ class ScenarioManager(object):
                     timestamp = snapshot.timestamp
             if timestamp:
                 self._tick_cosim_scenario(timestamp, sync_obj)
+                # self._tick_scenario(timestamp)
 
     def _tick_cosim_scenario(self, timestamp, sync_obj, warmup=False):
         """
@@ -173,8 +177,6 @@ class ScenarioManager(object):
 
                 if not sync_obj.sumo.player_id:
                     print("Adding ego vehicles to SUMO.. ")
-                    from sumo_integration.bridge_helper import BridgeHelper  # pylint: disable=wrong-import-position
-                    from sumo_integration.constants import INVALID_ACTOR_ID  # pylint: disable=wrong-import-position
                     carla_actor = self.ego_vehicles[0]
                     id = carla_actor.id
                     type_id = BridgeHelper.get_sumo_vtype(carla_actor)
@@ -190,7 +192,7 @@ class ScenarioManager(object):
                         sync_obj.sumo.player_id = sumo_actor_id
                         sync_obj.carla.player_id = id 
                 
-                for i in range(10):
+                for i in range(5):
                     sync_obj.tick()
 
                 ego_action = self._agent()
@@ -223,8 +225,27 @@ class ScenarioManager(object):
                                                         carla.Rotation(pitch=-90)))
 
         if self._running and self.get_running_status():
-            # CarlaDataProvider.get_world().tick(self._timeout)
-            sync_obj.tick()
+            if sync_obj.sumo.player_has_result() == False: 
+                print("Adding ego vehicles to SUMO.. ")
+                carla_actor = self.ego_vehicles[0]
+                id = carla_actor.id
+                type_id = BridgeHelper.get_sumo_vtype(carla_actor)
+                # color = self._player.attributes.get('color', None) 
+                color = None
+                if type_id is not None:
+                    sumo_actor_id = sync_obj.sumo.spawn_actor(type_id, color)
+                    if sumo_actor_id != INVALID_ACTOR_ID:
+                        sync_obj.carla2sumo_ids[id] = sumo_actor_id
+                        sync_obj.sumo.subscribe(sumo_actor_id)
+                
+                    self._player_sumo_id = sumo_actor_id
+                    sync_obj.sumo.player_id = sumo_actor_id
+                    sync_obj.carla.player_id = id 
+
+                    sync_obj.tick()
+                    
+            CarlaDataProvider.get_world().tick(self._timeout)
+            # sync_obj.tick()
 
     def _tick_scenario(self, timestamp):
         """
