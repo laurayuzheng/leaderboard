@@ -275,13 +275,17 @@ class LeaderboardCosim(object):
         xodr_file = os.path.join(CARLA_HOME, "CarlaUE4/Content/Carla/Maps/OpenDrive", current_map +'.xodr')
         # current_map.save_to_disk(xodr_file)
         net_file = os.path.join(PROJECT_ROOT, "sumo_integration", "examples", "net", current_map + '.net.xml')
+        new_net = False 
 
-        if not os.path.isfile(net_file):
+        # if not os.path.isfile(net_file):
+        if town not in ["Town01", "Town04", "Town05"]:
+            new_net = True
             netconvert_carla(xodr_file, net_file, guess_tls=True)
         basedir = os.path.join(PROJECT_ROOT, "sumo_integration")
         cfg_file = os.path.join(basedir,"examples", current_map + '.sumocfg')
 
-        if not os.path.isfile(cfg_file): 
+        # if not os.path.isfile(cfg_file):
+        if new_net: 
             vtypes_file = os.path.join(basedir, 'examples', 'carlavtypes.rou.xml')
             viewsettings_file = os.path.join(basedir, 'examples', 'viewsettings.xml')
             write_sumocfg_xml(cfg_file, net_file, vtypes_file, viewsettings_file, 0)

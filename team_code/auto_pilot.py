@@ -14,7 +14,7 @@ from team_code.map_agent import MapAgent
 from team_code.pid_controller import PIDController
 
 
-HAS_DISPLAY = True
+HAS_DISPLAY = False
 DEBUG = False
 WEATHERS = [
         carla.WeatherParameters.ClearNoon,
