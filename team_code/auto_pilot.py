@@ -196,7 +196,6 @@ class AutoPilot(MapAgent):
         control.brake = float(brake)
 
         if self.step % 10 == 0 and self.synchronization.sumo.player_has_result():
-            self.synchronization.tick()
             self.save(far_node, near_command, steer, throttle, brake, target_speed, data)
 
         return control

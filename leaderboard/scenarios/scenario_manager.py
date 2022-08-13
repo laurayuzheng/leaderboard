@@ -174,24 +174,34 @@ class ScenarioManager(object):
 
             try:
                 # print("Number of ego vehicles: ", len(self.ego_vehicles))
-
-                # if not sync_obj.sumo.player_id:
-                #     print("Adding ego vehicles to SUMO.. ")
-                #     carla_actor = self.ego_vehicles[0]
-                #     id = carla_actor.id
-                #     type_id = BridgeHelper.get_sumo_vtype(carla_actor)
-                #     # color = self._player.attributes.get('color', None) 
-                #     color = None
-                #     if type_id is not None:
-                #         sumo_actor_id = sync_obj.sumo.spawn_actor(type_id, color)
-                #         if sumo_actor_id != INVALID_ACTOR_ID:
-                #             sync_obj.carla2sumo_ids[id] = sumo_actor_id
-                #             sync_obj.sumo.subscribe(sumo_actor_id)
+                ticked_sync = False 
+                if not sync_obj.sumo.player_id:
+                    print("Adding ego vehicles to SUMO.. ")
+                    carla_actor = self.ego_vehicles[0]
+                    id = carla_actor.id
+                    type_id = BridgeHelper.get_sumo_vtype(carla_actor)
+                    # color = self._player.attributes.get('color', None) 
+                    color = None
+                    if type_id is not None:
+                        sumo_actor_id = sync_obj.sumo.spawn_actor(type_id, color)
+                        if sumo_actor_id != INVALID_ACTOR_ID:
+                            sync_obj.carla2sumo_ids[id] = sumo_actor_id
+                            sync_obj.sumo.subscribe(sumo_actor_id)
                     
-                #         self._player_sumo_id = sumo_actor_id
-                #         sync_obj.sumo.player_id = sumo_actor_id
-                #         sync_obj.carla.player_id = id 
-                
+                        sync_obj._player_sumo_id = sumo_actor_id
+                        sync_obj.sumo.player_id = sumo_actor_id
+                        sync_obj.carla.player_id = id 
+                        ticked_sync = True 
+
+                        carla_actor = sync_obj.carla.get_actor(id)
+
+                        sumo_transform = BridgeHelper.get_sumo_transform(carla_actor.get_transform(),
+                                                                        carla_actor.bounding_box.extent)
+                        sumo_lights = None
+
+                        # print("Synchronizing vehicle ", sumo_actor_id)
+                        sync_obj.sumo.synchronize_vehicle(sumo_actor_id, sumo_transform, sumo_lights)
+                        sync_obj.sumo.tick()
                 #         sync_obj.tick()
 
                 ego_action = self._agent()
@@ -224,7 +234,7 @@ class ScenarioManager(object):
                                                         carla.Rotation(pitch=-90)))
 
         if self._running and self.get_running_status():
-            ticked_sync = False 
+            
             if sync_obj.sumo.player_has_result() == False: 
                 print("Adding ego vehicles to SUMO.. ")
                 carla_actor = self.ego_vehicles[0]
@@ -238,14 +248,25 @@ class ScenarioManager(object):
                         sync_obj.carla2sumo_ids[id] = sumo_actor_id
                         sync_obj.sumo.subscribe(sumo_actor_id)
                 
-                    self._player_sumo_id = sumo_actor_id
+                    sync_obj._player_sumo_id = sumo_actor_id
                     sync_obj.sumo.player_id = sumo_actor_id
                     sync_obj.carla.player_id = id 
 
-                    sync_obj.tick()
                     ticked_sync = True
 
-            if ticked_sync == False:
+                    carla_actor = sync_obj.carla.get_actor(id)
+                    sumo_transform = BridgeHelper.get_sumo_transform(carla_actor.get_transform(),
+                                                                    carla_actor.bounding_box.extent)
+                    sumo_lights = None
+
+                    # print("Synchronizing vehicle ", sumo_actor_id)
+                    sync_obj.sumo.synchronize_vehicle(sumo_actor_id, sumo_transform, sumo_lights)
+
+                    sync_obj.sumo.tick()
+
+            if ticked_sync:
+                sync_obj.tick()
+            else:
                 CarlaDataProvider.get_world().tick(self._timeout)
 
             # sync_obj.tick()
