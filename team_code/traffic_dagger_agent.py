@@ -126,22 +126,6 @@ class TrafficDAggerAgent(MapAgent):
         self.converter = None
         self.path_to_conf_file = path_to_conf_file
 
-        # if path_to_conf_file:
-        #     now = datetime.datetime.now()
-        #     string = pathlib.Path(os.environ['ROUTES']).stem + '_'
-        #     string += '_'.join(map(lambda x: '%02d' % x, (now.month, now.day, now.hour, now.minute, now.second)))
-        #     print(string)
-
-        #     self.save_path = pathlib.Path(path_to_conf_file) / string
-        #     self.save_path.mkdir(exist_ok=False)
-
-        #     (self.save_path / 'rgb').mkdir()
-        #     (self.save_path / 'rgb_left').mkdir()
-        #     (self.save_path / 'rgb_right').mkdir()
-        #     (self.save_path / 'topdown').mkdir()
-        #     (self.save_path / 'measurements').mkdir()
-
-
     def _init(self):
         super()._init()
 
@@ -196,11 +180,11 @@ class TrafficDAggerAgent(MapAgent):
 
         return steer, throttle, brake, target_speed
 
-    def _init_policy(self, teacher_path):
+    def _init_policy(self, checkpoint):
         ## Initialize policy model from checkpoint
-        self.checkpoint_path = teacher_path
+        self.checkpoint_path = checkpoint
         self.converter = Converter()
-        self.net = TrafficImageModel.load_from_checkpoint(teacher_path)
+        self.net = TrafficImageModel.load_from_checkpoint(checkpoint)
         self.net.cuda()
         self.net.eval()
 
