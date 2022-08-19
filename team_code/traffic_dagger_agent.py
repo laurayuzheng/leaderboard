@@ -125,6 +125,7 @@ class TrafficDAggerAgent(MapAgent):
         self.checkpoint_path = None
         self.converter = None
         self.path_to_conf_file = path_to_conf_file
+        self.ticks_not_moving = 0
 
     def _init(self):
         super()._init()
@@ -216,10 +217,20 @@ class TrafficDAggerAgent(MapAgent):
             self._world.set_weather(WEATHERS[index])
 
         tick_data = self.tick(input_data)
+        speed = tick_data['speed']
+
+        if speed < 0.1: 
+            self.ticks_not_moving += 1
+        else: 
+            self.ticks_not_moving = 0
 
         # Save expert labels for DAgger
-        if self.save_path:
+        # Stop saving if agent is not moving anymore
+        if self.save_path and self.ticks_not_moving < 400:
             self._save_expert_labels(tick_data)
+        
+        if self.ticks_not_moving >= 400:
+            raise
 
         img = torchvision.transforms.functional.to_tensor(tick_data['image'])
         img = img[None].cuda()
@@ -231,14 +242,13 @@ class TrafficDAggerAgent(MapAgent):
         points_cam = points.clone().detach().cpu()
         control_out = self.net.controller(points).cpu().squeeze()
         acceleration = control_out.item() 
-        speed = tick_data['speed']
 
         points_cam[..., 0] = (points_cam[..., 0] + 1) / 2 * img.shape[-1]
         points_cam[..., 1] = (points_cam[..., 1] + 1) / 2 * img.shape[-2]
         points_cam = points_cam.squeeze()
         points_world = self.converter.cam_to_world(points_cam).numpy()
 
-        aim = (points_world[1] + points_world[2]) / 2.0
+        aim = (points_world[1] + points_world[0]) / 2.0
         angle = np.degrees(np.pi / 2 - np.arctan2(aim[1], aim[0])) / 90
         steer = self._turn_controller.step(angle)
         steer = np.clip(steer, -1.0, 1.0)
@@ -248,7 +258,7 @@ class TrafficDAggerAgent(MapAgent):
 
         delta = np.clip(acceleration, 0.0, 0.25)
         throttle = self._speed_controller.step(delta)
-        throttle = np.clip(throttle, 0.0, 1.0)
+        throttle = np.clip(throttle, 0.0, 0.75)
         throttle = throttle if not brake else 0.0
 
         control = carla.VehicleControl()
