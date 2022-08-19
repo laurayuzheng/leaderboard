@@ -419,7 +419,9 @@ class LeaderboardCosim(object):
         # Run the scenario
         try:
             # self.manager.run_scenario()
-            
+            for i in range(5):
+                self.synchronization.tick()
+                 
             self.manager.run_scenario_cosim(self.synchronization)
 
         except AgentError as e:

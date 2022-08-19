@@ -420,8 +420,8 @@ def main():
     parser.add_argument('--host', default='localhost',
                         help='IP of the host server (default: localhost)')
     parser.add_argument('--port', default='2000', help='TCP port to listen to (default: 2000)')
-    parser.add_argument('--trafficManagerPort', default='9000',
-                        help='Port to use for the TrafficManager (default: 9000)')
+    parser.add_argument('--trafficManagerPort', default='7000',
+                        help='Port to use for the TrafficManager (default: 7000)')
     parser.add_argument('--trafficManagerSeed', default='0',
                         help='Seed used by the TrafficManager (default: 0)')
     parser.add_argument('--debug', type=int, help='Run with debug output', default=0)

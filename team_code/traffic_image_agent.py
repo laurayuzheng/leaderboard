@@ -7,7 +7,7 @@ import carla
 
 from PIL import Image, ImageDraw
 
-from carla_project.src.image_model import ImageModel
+from carla_project.src.traffic_img_model import TrafficImageModel
 from carla_project.src.converter import Converter
 
 from team_code.base_agent import BaseAgent
@@ -18,10 +18,10 @@ DEBUG = int(os.environ.get('HAS_DISPLAY', 0))
 
 
 def get_entry_point():
-    return 'ImageAgent'
+    return 'TrafficImageAgent'
 
 
-def debug_display(tick_data, target_cam, out, steer, throttle, brake, desired_speed, step):
+def debug_display(tick_data, target_cam, out, steer, throttle, brake, desired_speed, accel, step):
     _rgb = Image.fromarray(tick_data['rgb'])
     _draw_rgb = ImageDraw.Draw(_rgb)
     _draw_rgb.ellipse((target_cam[0]-3,target_cam[1]-3,target_cam[0]+3,target_cam[1]+3), (255, 255, 255))
@@ -39,6 +39,7 @@ def debug_display(tick_data, target_cam, out, steer, throttle, brake, desired_sp
     _draw.text((5, 50), 'Brake: %s' % brake)
     _draw.text((5, 70), 'Speed: %.3f' % tick_data['speed'])
     _draw.text((5, 90), 'Desired: %.3f' % desired_speed)
+    _draw.text((5, 110), 'Accel: %.3f' % accel)
 
     cv2.imshow('map', cv2.cvtColor(np.array(_combined), cv2.COLOR_BGR2RGB))
     cv2.waitKey(1)
@@ -49,7 +50,7 @@ class TrafficImageAgent(BaseAgent):
         super().setup(path_to_conf_file)
 
         self.converter = Converter()
-        self.net = ImageModel.load_from_checkpoint(path_to_conf_file)
+        self.net = TrafficImageModel.load_from_checkpoint(path_to_conf_file)
         self.net.cuda()
         self.net.eval()
 
@@ -82,48 +83,6 @@ class TrafficImageAgent(BaseAgent):
 
         return result
 
-    @torch.no_grad()
-    def run_step(self, input_data, timestamp):
-        if not self.initialized:
-            self._init()
-
-        tick_data = self.tick(input_data)
-
-        img = torchvision.transforms.functional.to_tensor(tick_data['image'])
-        img = img[None].cuda()
-
-        target = torch.from_numpy(tick_data['target'])
-        target = target[None].cuda()
-
-        points, (target_cam, _) = self.net.forward(img, target)
-        control = self.net.controller(points).cpu().squeeze()
-
-        steer = control[0].item()
-        # desired_speed = control[1].item()
-        acceleration = control[1].item()
-        speed = tick_data['speed']
-        desired_speed = acceleration*0.1 + speed # compute from control output
-
-        brake = desired_speed < 0.4 or (speed / desired_speed) > 1.1
-
-        delta = np.clip(desired_speed - speed, 0.0, 0.25)
-        throttle = self._speed_controller.step(delta)
-        throttle = np.clip(throttle, 0.0, 0.75)
-        throttle = throttle if not brake else 0.0
-
-        control = carla.VehicleControl()
-        control.steer = steer
-        control.throttle = throttle
-        control.brake = float(brake)
-
-        if DEBUG:
-            debug_display(
-                    tick_data, target_cam.squeeze(), points.cpu().squeeze(),
-                    steer, throttle, brake, desired_speed,
-                    self.step)
-
-        return control
-
     # @torch.no_grad()
     # def run_step(self, input_data, timestamp):
     #     if not self.initialized:
@@ -138,21 +97,13 @@ class TrafficImageAgent(BaseAgent):
     #     target = target[None].cuda()
 
     #     points, (target_cam, _) = self.net.forward(img, target)
-    #     points_cam = points.clone().cpu()
-    #     points_cam[..., 0] = (points_cam[..., 0] + 1) / 2 * img.shape[-1]
-    #     points_cam[..., 1] = (points_cam[..., 1] + 1) / 2 * img.shape[-2]
-    #     points_cam = points_cam.squeeze()
-    #     points_world = self.converter.cam_to_world(points_cam).numpy()
+    #     control = self.net.controller(points).cpu().squeeze()
 
-    #     aim = (points_world[1] + points_world[0]) / 2.0
-    #     angle = np.degrees(np.pi / 2 - np.arctan2(aim[1], aim[0])) / 90
-    #     steer = self._turn_controller.step(angle)
-    #     steer = np.clip(steer, -1.0, 1.0)
-
-    #     desired_speed = np.linalg.norm(points_world[0] - points_world[1]) * 2.0
-    #     # desired_speed *= (1 - abs(angle)) ** 2
-
+    #     steer = control[0].item()
+    #     # desired_speed = control[1].item()
+    #     acceleration = control[1].item()
     #     speed = tick_data['speed']
+    #     desired_speed = acceleration*0.1 + speed # compute from control output
 
     #     brake = desired_speed < 0.4 or (speed / desired_speed) > 1.1
 
@@ -173,4 +124,57 @@ class TrafficImageAgent(BaseAgent):
     #                 self.step)
 
     #     return control
+
+    @torch.no_grad()
+    def run_step(self, input_data, timestamp):
+        if not self.initialized:
+            self._init()
+
+        tick_data = self.tick(input_data)
+
+        img = torchvision.transforms.functional.to_tensor(tick_data['image'])
+        img = img[None].cuda()
+
+        target = torch.from_numpy(tick_data['target'])
+        target = target[None].cuda()
+
+        points, (target_cam, _) = self.net.forward(img, target)
+        points_cam = points.clone().cpu()
+        control_out = self.net.controller(points).cpu().squeeze()
+        acceleration = control_out.item() 
+        speed = tick_data['speed']
+
+        points_cam[..., 0] = (points_cam[..., 0] + 1) / 2 * img.shape[-1]
+        points_cam[..., 1] = (points_cam[..., 1] + 1) / 2 * img.shape[-2]
+        points_cam = points_cam.squeeze()
+        points_world = self.converter.cam_to_world(points_cam).numpy()
+        # print(points_world)
+
+        aim = (points_world[1] + points_world[2]) / 2.0
+        angle = np.degrees(np.pi / 2 - np.arctan2(aim[1], aim[0])) / 90
+        steer = self._turn_controller.step(angle)
+        steer = np.clip(steer, -1.0, 1.0)
+
+        desired_speed = np.linalg.norm(points_world[1] - points_world[2]) * 2.0 
+        brake = desired_speed < 0.1 or (speed / desired_speed) > 1.1 # or acceleration < -0.1
+        # brake = acceleration < 0
+
+        # delta = np.clip(acceleration, 0.0, 0.25)
+        delta = np.clip(acceleration, 0.0, 0.25)
+        throttle = self._speed_controller.step(delta)
+        throttle = np.clip(throttle, 0.0, 1.0)
+        throttle = throttle if not brake else 0.0
+
+        control = carla.VehicleControl()
+        control.steer = steer
+        control.throttle = throttle
+        control.brake = float(brake)
+
+        if DEBUG:
+            debug_display(
+                    tick_data, target_cam.squeeze(), points.cpu().squeeze(),
+                    steer, throttle, brake, desired_speed, acceleration,
+                    self.step)
+
+        return control
 

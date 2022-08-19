@@ -186,6 +186,7 @@ class ScenarioManager(object):
                         sumo_actor_id = sync_obj.sumo.spawn_actor(type_id, color)
                         if sumo_actor_id != INVALID_ACTOR_ID:
                             sync_obj.carla2sumo_ids[id] = sumo_actor_id
+                            sync_obj.carla_sumo2carla_ids[sumo_actor_id] = id
                             sync_obj.sumo.subscribe(sumo_actor_id)
                     
                         sync_obj._player_sumo_id = sumo_actor_id
@@ -246,6 +247,7 @@ class ScenarioManager(object):
                     sumo_actor_id = sync_obj.sumo.spawn_actor(type_id, color)
                     if sumo_actor_id != INVALID_ACTOR_ID:
                         sync_obj.carla2sumo_ids[id] = sumo_actor_id
+                        sync_obj.carla_sumo2carla_ids[sumo_actor_id] = id
                         sync_obj.sumo.subscribe(sumo_actor_id)
                 
                     sync_obj._player_sumo_id = sumo_actor_id
@@ -264,12 +266,12 @@ class ScenarioManager(object):
 
                     sync_obj.sumo.tick()
 
-            if ticked_sync:
-                sync_obj.tick()
-            else:
-                CarlaDataProvider.get_world().tick(self._timeout)
+            # if ticked_sync:
+            #     sync_obj.tick()
+            # else:
+            #     CarlaDataProvider.get_world().tick(self._timeout)
 
-            # sync_obj.tick()
+            sync_obj.tick()
 
     def _tick_scenario(self, timestamp):
         """
