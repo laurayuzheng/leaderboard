@@ -118,7 +118,7 @@ class ScenarioManager(object):
 
         self._agent.setup_sensors(self.ego_vehicles[0], self._debug_mode)
 
-    def run_scenario(self):
+    def run_scenario(self, max_ticks=1000):
         """
         Trigger the start of the scenario and wait for it to finish/fail
         """
@@ -127,6 +127,7 @@ class ScenarioManager(object):
 
         self._watchdog.start()
         self._running = True
+        ticks = 0
 
         while self._running:
             timestamp = None
@@ -135,8 +136,17 @@ class ScenarioManager(object):
                 snapshot = world.get_snapshot()
                 if snapshot:
                     timestamp = snapshot.timestamp
-            if timestamp:
-                self._tick_scenario(timestamp)
+            try:
+                if timestamp and ticks < max_ticks:
+                    self._tick_scenario(timestamp)
+                    ticks += 1
+                
+                if ticks >= max_ticks:
+                    break 
+
+            except:
+                break
+                
 
     def run_scenario_cosim(self, sync_obj, max_ticks=1000):
         """
@@ -161,8 +171,11 @@ class ScenarioManager(object):
                 if timestamp and ticks < max_ticks:
                     self._tick_cosim_scenario(timestamp, sync_obj)
                     ticks += 1
+                
+                if ticks >= max_ticks:
+                    break 
             except:
-                pass
+                break
                 # self._tick_scenario(timestamp)
 
     def _tick_cosim_scenario(self, timestamp, sync_obj, warmup=False):
