@@ -156,9 +156,13 @@ class ScenarioManager(object):
                 snapshot = world.get_snapshot()
                 if snapshot:
                     timestamp = snapshot.timestamp
-            if timestamp and ticks < max_ticks:
-                self._tick_cosim_scenario(timestamp, sync_obj)
-                ticks += 1
+            
+            try:
+                if timestamp and ticks < max_ticks:
+                    self._tick_cosim_scenario(timestamp, sync_obj)
+                    ticks += 1
+            except:
+                pass
                 # self._tick_scenario(timestamp)
 
     def _tick_cosim_scenario(self, timestamp, sync_obj, warmup=False):
