@@ -1,7 +1,3 @@
-''' This agent should run the trained traffic-informed IL agent policy commands, 
-but generate "expert" steering labels similar to auto_pilot.py 
-'''
-
 import os
 import time
 import datetime
@@ -10,9 +6,6 @@ import pathlib
 import numpy as np
 import cv2
 import carla
-import numpy as np
-import torch
-import torchvision
 
 from PIL import Image, ImageDraw
 
@@ -20,14 +13,10 @@ from carla_project.src.common import CONVERTER, COLOR
 from team_code.map_agent import MapAgent
 from team_code.pid_controller import PIDController
 
-from PIL import Image, ImageDraw
+from srunner.scenariomanager.timer import GameTime
 
-from carla_project.src.traffic_img_model import TrafficImageModel
-from carla_project.src.converter import Converter
 
-from team_code.base_agent import BaseAgent
-
-HAS_DISPLAY = False
+HAS_DISPLAY = True
 DEBUG = False
 WEATHERS = [
         carla.WeatherParameters.ClearNoon,
@@ -52,33 +41,9 @@ WEATHERS = [
         carla.WeatherParameters.SoftRainSunset,
 ]
 
-# DEBUG = int(os.environ.get('HAS_DISPLAY', 0))
 
 def get_entry_point():
-    return 'TrafficDAggerAgent'
-
-def debug_display(tick_data, target_cam, out, steer, throttle, brake, desired_speed, accel, step):
-    _rgb = Image.fromarray(tick_data['rgb'])
-    _draw_rgb = ImageDraw.Draw(_rgb)
-    _draw_rgb.ellipse((target_cam[0]-3,target_cam[1]-3,target_cam[0]+3,target_cam[1]+3), (255, 255, 255))
-
-    for x, y in out:
-        x = (x + 1) / 2 * 256
-        y = (y + 1) / 2 * 144
-
-        _draw_rgb.ellipse((x-2, y-2, x+2, y+2), (0, 0, 255))
-
-    _combined = Image.fromarray(np.hstack([tick_data['rgb_left'], _rgb, tick_data['rgb_right']]))
-    _draw = ImageDraw.Draw(_combined)
-    _draw.text((5, 10), 'Steer: %.3f' % steer)
-    _draw.text((5, 30), 'Throttle: %.3f' % throttle)
-    _draw.text((5, 50), 'Brake: %s' % brake)
-    _draw.text((5, 70), 'Speed: %.3f' % tick_data['speed'])
-    _draw.text((5, 90), 'Desired: %.3f' % desired_speed)
-    _draw.text((5, 110), 'Accel: %.3f' % accel)
-
-    cv2.imshow('map', cv2.cvtColor(np.array(_combined), cv2.COLOR_BGR2RGB))
-    cv2.waitKey(1)
+    return 'AccelAgent'
 
 
 def _numpy(carla_vector, normalize=False):
@@ -111,27 +76,56 @@ def get_collision(p1, v1, p2, v2):
     return collides, p1 + x[0] * v1
 
 
-class TrafficDAggerAgent(MapAgent):
+class AccelAgent(MapAgent):
     def setup(self, path_to_conf_file):
         super().setup(path_to_conf_file)
-        # print("conf file path: ", path_to_conf_file)
-        print("save path: ", path_to_conf_file)
-        
-        ## Inherited from auto pilot 
-        self.save_path = None
+
+        # self.save_path = None
+        print("Initializing AccelAgent")
         self.synchronization = None
-        self.routes_saved = 0
-        self.net = None
-        self.checkpoint_path = None
-        self.converter = None
-        self.path_to_conf_file = path_to_conf_file
-        self.ticks_not_moving = 0
+
+        # if path_to_conf_file:
+        #     now = datetime.datetime.now()
+        #     string = pathlib.Path(os.environ['ROUTES']).stem + '_'
+        #     string += '_'.join(map(lambda x: '%02d' % x, (now.month, now.day, now.hour, now.minute, now.second)))
+
+        #     print(string)
+
+        #     self.save_path = pathlib.Path(path_to_conf_file) / string
+        #     self.save_path.mkdir(exist_ok=False)
+
+        #     (self.save_path / 'rgb').mkdir()
+        #     (self.save_path / 'rgb_left').mkdir()
+        #     (self.save_path / 'rgb_right').mkdir()
+        #     (self.save_path / 'topdown').mkdir()
+        #     (self.save_path / 'measurements').mkdir()
 
     def _init(self):
         super()._init()
 
         self._turn_controller = PIDController(K_P=1.25, K_I=0.75, K_D=0.3, n=40)
         self._speed_controller = PIDController(K_P=5.0, K_I=0.5, K_D=1.0, n=40)
+
+    def forward_step(self, action):
+        """
+        Execute the agent call, e.g. agent()
+        Returns the next vehicle controls
+        """
+        input_data = self.sensor_interface.get_data()
+
+        timestamp = GameTime.get_time()
+
+        if not self.wallclock_t0:
+            self.wallclock_t0 = GameTime.get_wallclocktime()
+        wallclock = GameTime.get_wallclocktime()
+        wallclock_diff = (wallclock - self.wallclock_t0).total_seconds()
+
+        # print('======[Agent] Wallclock_time = {} / {} / Sim_time = {} / {}x'.format(wallclock, wallclock_diff, timestamp, timestamp/(wallclock_diff+0.001)))
+
+        control, rgb, state, player_ind = self.run_step(input_data, action, timestamp)
+        control.manual_gear_shift = False
+
+        return control, rgb, state, player_ind
 
     def _get_angle_to(self, pos, theta, target):
         R = np.array([
@@ -145,7 +139,7 @@ class TrafficDAggerAgent(MapAgent):
 
         return angle
 
-    def _get_control(self, target, far_target, tick_data, _draw):
+    def _get_control(self, target, far_target, tick_data, accel, _draw):
         pos = self._get_position(tick_data)
         theta = tick_data['compass']
         speed = tick_data['speed']
@@ -160,8 +154,9 @@ class TrafficDAggerAgent(MapAgent):
 
         # Acceleration.
         angle_far_unnorm = self._get_angle_to(pos, theta, far_target)
-        should_slow = abs(angle_far_unnorm) > 45.0 or abs(angle_unnorm) > 5.0
-        target_speed = 4 if should_slow else 7.0
+        # should_slow = abs(angle_far_unnorm) > 45.0 or abs(angle_unnorm) > 5.0
+        # target_speed = 4 if should_slow else 7.0
+        target_speed = 0.05 * accel + speed # FPS is 20 --> time step is 1/20
 
         brake = self._should_brake()
         target_speed = target_speed if not brake else 0.0
@@ -181,100 +176,15 @@ class TrafficDAggerAgent(MapAgent):
 
         return steer, throttle, brake, target_speed
 
-    def _init_policy(self, checkpoint):
-        ## Initialize policy model from checkpoint
-        self.checkpoint_path = checkpoint
-        self.converter = Converter()
-        self.net = TrafficImageModel.load_from_checkpoint(checkpoint)
-        self.net.cuda()
-        self.net.eval()
-
-    def _init_savedir(self, dirname):
-        now = datetime.datetime.now()
-        string = dirname + '_'
-        string += '_'.join(map(lambda x: '%02d' % x, (now.month, now.day, now.hour, now.minute, now.second)))
-        # print(string)
-
-        self.save_path = pathlib.Path(self.path_to_conf_file) / string
-        print("Data save dir initialized to: ", self.save_path)
-        self.save_path.mkdir(exist_ok=False)
-
-        (self.save_path / 'rgb').mkdir()
-        (self.save_path / 'rgb_left').mkdir()
-        (self.save_path / 'rgb_right').mkdir()
-        (self.save_path / 'topdown').mkdir()
-        (self.save_path / 'measurements').mkdir()
-
-    ## Run learned policy and have expert label + save
-    ## Almost identical to the image agent, except for saving labels
-    def run_step(self, input_data, timestamp):
+    def run_step(self, input_data, accel, timestamp):
         if not self.initialized:
             self._init()
 
-        # Randomly change weather for robustness
         if self.step % 100 == 0:
             index = (self.step // 100) % len(WEATHERS)
             self._world.set_weather(WEATHERS[index])
 
-        tick_data = self.tick(input_data)
-        speed = tick_data['speed']
-
-        if speed < 0.1: 
-            self.ticks_not_moving += 1
-        else: 
-            self.ticks_not_moving = 0
-
-        # Save expert labels for DAgger
-        # Stop saving if agent is not moving anymore
-        if self.save_path and self.ticks_not_moving < 400:
-            self._save_expert_labels(tick_data)
-        
-        if self.ticks_not_moving >= 400:
-            raise
-
-        img = torchvision.transforms.functional.to_tensor(tick_data['image'])
-        img = img[None].cuda()
-
-        target = torch.from_numpy(tick_data['target'])
-        target = target[None].cuda()
-
-        points, (target_cam, _) = self.net.forward(img, target)
-        points_cam = points.clone().detach().cpu()
-        control_out = self.net.controller(points).cpu().squeeze()
-        acceleration = control_out.item() 
-
-        points_cam[..., 0] = (points_cam[..., 0] + 1) / 2 * img.shape[-1]
-        points_cam[..., 1] = (points_cam[..., 1] + 1) / 2 * img.shape[-2]
-        points_cam = points_cam.squeeze()
-        points_world = self.converter.cam_to_world(points_cam).numpy()
-
-        aim = (points_world[1] + points_world[0]) / 2.0
-        angle = np.degrees(np.pi / 2 - np.arctan2(aim[1], aim[0])) / 90
-        steer = self._turn_controller.step(angle)
-        steer = np.clip(steer, -1.0, 1.0)
-
-        desired_speed = np.linalg.norm(points_world[1] - points_world[0]) * 2.0 
-        brake = desired_speed < 0.1 or (speed / desired_speed) > 1.1 # or acceleration < -0.1
-
-        delta = np.clip(acceleration, 0.0, 0.25)
-        throttle = self._speed_controller.step(delta)
-        throttle = np.clip(throttle, 0.0, 0.75)
-        throttle = throttle if not brake else 0.0
-
-        control = carla.VehicleControl()
-        control.steer = steer
-        control.throttle = throttle
-        control.brake = float(brake)
-
-        if DEBUG:
-            debug_display(
-                    tick_data, target_cam.squeeze(), points.cpu().squeeze(),
-                    steer, throttle, brake, desired_speed, acceleration,
-                    self.step)
-
-        return control # Send policy-generated control to agent
-
-    def _save_expert_labels(self, data):
+        data = self.tick(input_data)
         topdown = data['topdown']
         rgb = np.hstack((data['rgb_left'], data['rgb'], data['rgb_right']))
 
@@ -293,7 +203,7 @@ class TrafficDAggerAgent(MapAgent):
         _combined = Image.fromarray(np.hstack((_rgb, _topdown)))
         _draw = ImageDraw.Draw(_combined)
 
-        steer, throttle, brake, target_speed = self._get_control(near_node, far_node, data, _draw)
+        steer, throttle, brake, target_speed = self._get_control(near_node, far_node, data, accel, _draw)
 
         _draw.text((5, 10), 'FPS: %.3f' % (self.step / (time.time() - self.wall_start)))
         _draw.text((5, 30), 'Steer: %.3f' % steer)
@@ -309,33 +219,12 @@ class TrafficDAggerAgent(MapAgent):
         control.throttle = throttle
         control.brake = float(brake)
 
-        if self.step % 10 == 0 and self.synchronization.sumo.player_has_result():
-            self.save(far_node, near_command, steer, throttle, brake, target_speed, data)
+        state, player_ind = self.synchronization.get_state()
 
+        # if self.step % 10 == 0:
+        #     self.save(far_node, near_command, steer, throttle, brake, target_speed, data)
 
-    def tick(self, input_data):
-        result = super().tick(input_data)
-        result['image'] = np.concatenate(tuple(result[x] for x in ['rgb', 'rgb_left', 'rgb_right']), -1)
-
-        theta = result['compass']
-        theta = 0.0 if np.isnan(theta) else theta
-        theta = theta + np.pi / 2
-        R = np.array([
-            [np.cos(theta), -np.sin(theta)],
-            [np.sin(theta),  np.cos(theta)],
-            ])
-
-        gps = self._get_position(result)
-        far_node, _ = self._command_planner.run_step(gps)
-        target = R.T.dot(far_node - gps)
-        target *= 5.5
-        target += [128, 256]
-        target = np.clip(target, 0, 256)
-
-        result['target'] = target
-
-        return result
-
+        return control, rgb, state, player_ind
 
     def save(self, far_node, near_command, steer, throttle, brake, target_speed, tick_data):
         frame = self.step // 10

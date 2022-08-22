@@ -150,17 +150,17 @@ class TrafficImageAgent(BaseAgent):
         points_world = self.converter.cam_to_world(points_cam).numpy()
         # print(points_world)
 
-        aim = (points_world[1] + points_world[2]) / 2.0
+        aim = (points_world[1] + points_world[0]) / 2.0
         angle = np.degrees(np.pi / 2 - np.arctan2(aim[1], aim[0])) / 90
         steer = self._turn_controller.step(angle)
         steer = np.clip(steer, -1.0, 1.0)
 
-        desired_speed = np.linalg.norm(points_world[1] - points_world[2]) * 2.0 
+        desired_speed = np.linalg.norm(points_world[1] - points_world[0]) * 2.0 
         brake = desired_speed < 0.1 or (speed / desired_speed) > 1.1 # or acceleration < -0.1
         # brake = acceleration < 0
 
         # delta = np.clip(acceleration, 0.0, 0.25)
-        delta = np.clip(acceleration, 0.0, 0.25)
+        delta = np.clip(desired_speed - speed, 0.0, 0.25)
         throttle = self._speed_controller.step(delta)
         throttle = np.clip(throttle, 0.0, 1.0)
         throttle = throttle if not brake else 0.0

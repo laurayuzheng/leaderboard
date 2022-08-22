@@ -41,7 +41,7 @@ WEATHERS = [
 
 
 def get_entry_point():
-    return 'AutoPilot'
+    return 'TrafficAutoPilot'
 
 
 def _numpy(carla_vector, normalize=False):
@@ -74,7 +74,7 @@ def get_collision(p1, v1, p2, v2):
     return collides, p1 + x[0] * v1
 
 
-class AutoPilot(MapAgent):
+class TrafficAutoPilot(MapAgent):
     def setup(self, path_to_conf_file):
         super().setup(path_to_conf_file)
 
