@@ -2,6 +2,7 @@ from collections import OrderedDict
 from dictor import dictor
 
 import copy
+import random
 
 from srunner.scenarioconfigs.route_scenario_configuration import RouteScenarioConfiguration
 
@@ -11,7 +12,7 @@ from leaderboard.utils.checkpoint_tools import fetch_dict, create_default_json_m
 
 
 class RouteIndexer():
-    def __init__(self, routes_file, scenarios_file, repetitions):
+    def __init__(self, routes_file, scenarios_file, repetitions, shuffle=False):
         self._routes_file = routes_file
         self._scenarios_file = scenarios_file
         self._repetitions = repetitions
@@ -33,6 +34,9 @@ class RouteIndexer():
                 self._configs_dict['{}.{}'.format(config.name, repetition)] = copy.copy(config)
 
         self._configs_list = list(self._configs_dict.items())
+
+        if shuffle: 
+            random.shuffle(self._configs_list)
 
     def peek(self):
         return not (self._index >= len(self._configs_list))

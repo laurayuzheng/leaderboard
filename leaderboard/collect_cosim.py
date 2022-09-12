@@ -422,7 +422,7 @@ class LeaderboardCosim(object):
             for i in range(5):
                 self.synchronization.tick()
                  
-            self.manager.run_scenario_cosim(self.synchronization)
+            self.manager.run_scenario_cosim(self.synchronization, record_traffic=args.record_traffic_metrics)
 
         except AgentError as e:
             # The agent has failed -> stop the route
@@ -443,6 +443,9 @@ class LeaderboardCosim(object):
         # Stop the scenario
         try:
             print("\033[1m> Stopping the route\033[0m")
+            if args.record_traffic_metrics == True: 
+                self.manager.save_traffic_info_scenario() 
+
             self.manager.stop_scenario()
             self._register_statistics(config, args.checkpoint, entry_status, crash_message)
 
@@ -502,7 +505,7 @@ def main():
     parser.add_argument('--host', default='localhost',
                         help='IP of the host server (default: localhost)')
     # parser.add_argument('--port', default='2000', help='TCP port to listen to (default: 2000)')
-    parser.add_argument('--trafficManagerPort', default='9000',
+    parser.add_argument('--trafficManagerPort', default='10000',
                         help='Port to use for the TrafficManager (default: 9000)')
     parser.add_argument('--trafficManagerSeed', default='0',
                         help='Seed used by the TrafficManager (default: 0)')
@@ -511,6 +514,9 @@ def main():
                         help='Use CARLA recording feature to create a recording of the scenario')
     parser.add_argument('--timeout', default="60.0",
                         help='Set the CARLA client timeout value in seconds')
+    parser.add_argument('--record-traffic-metrics',
+                           action='store_true',
+                           help='record traffic metrics in csv')
 
     # simulation setup
     parser.add_argument('--routes',
@@ -549,7 +555,7 @@ def main():
                            help='IP of the sumo host server (default: 127.0.0.1)')
     parser.add_argument('--sumo-port',
                            metavar='P',
-                           default=8813,
+                           default=8000,
                            type=int,
                            help='TCP port to listen to (default: 8813)')
     parser.add_argument('--sumo-gui', action='store_true', help='run the gui version of sumo')

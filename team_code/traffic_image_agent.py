@@ -141,7 +141,8 @@ class TrafficImageAgent(BaseAgent):
         points, (target_cam, _) = self.net.forward(img, target)
         points_cam = points.clone().cpu()
         control_out = self.net.controller(points).cpu().squeeze()
-        acceleration = control_out.item() 
+        # steer = control_out[0].item()
+        desired_speed = control_out[1].item()
         speed = tick_data['speed']
 
         points_cam[..., 0] = (points_cam[..., 0] + 1) / 2 * img.shape[-1]
@@ -150,19 +151,20 @@ class TrafficImageAgent(BaseAgent):
         points_world = self.converter.cam_to_world(points_cam).numpy()
         # print(points_world)
 
-        aim = (points_world[1] + points_world[0]) / 2.0
+        aim = (points_world[1] + points_world[2]) / 2.0
         angle = np.degrees(np.pi / 2 - np.arctan2(aim[1], aim[0])) / 90
         steer = self._turn_controller.step(angle)
         steer = np.clip(steer, -1.0, 1.0)
 
-        desired_speed = np.linalg.norm(points_world[1] - points_world[0]) * 2.0 
-        brake = desired_speed < 0.1 or (speed / desired_speed) > 1.1 # or acceleration < -0.1
+        desired_speed_brake = np.linalg.norm(points_world[1] - points_world[0]) * 2.0 
+        # desired_speed = speed + acceleration 
+        brake = desired_speed_brake < 0.2 # or (speed / desired_speed) > 1.1 # or acceleration < -0.1
         # brake = acceleration < 0
 
-        # delta = np.clip(acceleration, 0.0, 0.25)
         delta = np.clip(desired_speed - speed, 0.0, 0.25)
+        # delta = np.clip(desired_speed - speed, 0.0, 0.25)
         throttle = self._speed_controller.step(delta)
-        throttle = np.clip(throttle, 0.0, 1.0)
+        throttle = np.clip(throttle, 0.0, 0.75)
         throttle = throttle if not brake else 0.0
 
         control = carla.VehicleControl()
@@ -173,7 +175,7 @@ class TrafficImageAgent(BaseAgent):
         if DEBUG:
             debug_display(
                     tick_data, target_cam.squeeze(), points.cpu().squeeze(),
-                    steer, throttle, brake, desired_speed, acceleration,
+                    steer, throttle, brake, desired_speed, desired_speed - speed,
                     self.step)
 
         return control

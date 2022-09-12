@@ -16,7 +16,7 @@ from team_code.pid_controller import PIDController
 from srunner.scenariomanager.timer import GameTime
 
 
-HAS_DISPLAY = True
+HAS_DISPLAY = False
 DEBUG = False
 WEATHERS = [
         carla.WeatherParameters.ClearNoon,
@@ -122,10 +122,13 @@ class AccelAgent(MapAgent):
 
         # print('======[Agent] Wallclock_time = {} / {} / Sim_time = {} / {}x'.format(wallclock, wallclock_diff, timestamp, timestamp/(wallclock_diff+0.001)))
 
-        control, rgb, state, player_ind = self.run_step(input_data, action, timestamp)
+        control, topdown, state, player_ind = self.run_step(input_data, action, timestamp)
+        fuel_consumption = self.synchronization.sumo.get_playerlane_fuel_consumption()
+
+        # print("Topdown shape: ", topdown.shape)
         control.manual_gear_shift = False
 
-        return control, rgb, state, player_ind
+        return control, topdown, state, player_ind, fuel_consumption
 
     def _get_angle_to(self, pos, theta, target):
         R = np.array([
@@ -156,7 +159,7 @@ class AccelAgent(MapAgent):
         angle_far_unnorm = self._get_angle_to(pos, theta, far_target)
         # should_slow = abs(angle_far_unnorm) > 45.0 or abs(angle_unnorm) > 5.0
         # target_speed = 4 if should_slow else 7.0
-        target_speed = 0.05 * accel + speed # FPS is 20 --> time step is 1/20
+        target_speed = accel + speed # FPS is 20 --> time step is 1/20
 
         brake = self._should_brake()
         target_speed = target_speed if not brake else 0.0
@@ -173,6 +176,7 @@ class AccelAgent(MapAgent):
         _draw.text((5, 110), 'Target: %.3f' % target_speed)
         _draw.text((5, 130), 'Angle: %.3f' % angle_unnorm)
         _draw.text((5, 150), 'Angle Far: %.3f' % angle_far_unnorm)
+        _draw.text((5, 170), 'Acceleration: %.3f' % accel)
 
         return steer, throttle, brake, target_speed
 
@@ -220,11 +224,12 @@ class AccelAgent(MapAgent):
         control.brake = float(brake)
 
         state, player_ind = self.synchronization.get_state()
+        
 
         # if self.step % 10 == 0:
         #     self.save(far_node, near_command, steer, throttle, brake, target_speed, data)
 
-        return control, rgb, state, player_ind
+        return control, topdown, state, player_ind
 
     def save(self, far_node, near_command, steer, throttle, brake, target_speed, tick_data):
         frame = self.step // 10

@@ -17,6 +17,9 @@ import time
 
 import py_trees
 import carla
+import datetime
+from csv import writer
+import numpy as np
 
 from srunner.scenariomanager.carla_data_provider import CarlaDataProvider
 from srunner.scenariomanager.timer import GameTime
@@ -82,6 +85,12 @@ class ScenarioManager(object):
         # Use the callback_id inside the signal handler to allow external interrupts
         signal.signal(signal.SIGINT, self.signal_handler)
 
+        self.traffic_info_csv = "traffic_metadata_"
+        now = datetime.datetime.now()
+        self.traffic_info_csv += '_'.join(map(lambda x: '%02d' % x, (now.month, now.day, now.hour, now.minute, now.second)))
+        self.traffic_info_csv += ".csv"
+        self.scenario_traffic_info = []
+
     def signal_handler(self, signum, frame):
         """
         Terminate scenario ticking when receiving a signal interrupt
@@ -117,8 +126,17 @@ class ScenarioManager(object):
         # py_trees.display.render_dot_tree(self.scenario_tree)
 
         self._agent.setup_sensors(self.ego_vehicles[0], self._debug_mode)
+        self.scenario_traffic_info.append(self.scenario.name)
 
-    def run_scenario(self, max_ticks=1000):
+    def start_scenario_rl(self):
+        self.start_system_time = time.time()
+        self.start_game_time = GameTime.get_time()
+
+        # self._watchdog.start()
+        # self._running = True
+        # ticks = 0
+
+    def run_scenario(self, max_ticks=100000):
         """
         Trigger the start of the scenario and wait for it to finish/fail
         """
@@ -148,7 +166,7 @@ class ScenarioManager(object):
                 break
                 
 
-    def run_scenario_cosim(self, sync_obj, max_ticks=1000):
+    def run_scenario_cosim(self, sync_obj, max_ticks=1000, record_traffic=False):
         """
         Trigger the start of the scenario and wait for it to finish/fail
         """
@@ -169,7 +187,7 @@ class ScenarioManager(object):
             
             try:
                 if timestamp and ticks < max_ticks:
-                    self._tick_cosim_scenario(timestamp, sync_obj)
+                    self._tick_cosim_scenario(timestamp, sync_obj, record_traffic=record_traffic)
                     ticks += 1
                 
                 if ticks >= max_ticks:
@@ -178,7 +196,7 @@ class ScenarioManager(object):
                 break
                 # self._tick_scenario(timestamp)
 
-    def _tick_cosim_scenario(self, timestamp, sync_obj, warmup=False):
+    def _tick_cosim_scenario(self, timestamp, sync_obj, warmup=False, record_traffic=False):
         """
         Run next tick of scenario and the agent and tick the world.
         """
@@ -223,7 +241,8 @@ class ScenarioManager(object):
                         sync_obj.sumo.synchronize_vehicle(sumo_actor_id, sumo_transform, sumo_lights)
                         sync_obj.sumo.tick()
                 #         sync_obj.tick()
-
+                
+                # print("Getting ego action.. ")
                 ego_action = self._agent()
 
             # Special exception inside the agent that isn't caused by the agent
@@ -289,15 +308,32 @@ class ScenarioManager(object):
                 sync_obj.tick()
             else:
                 CarlaDataProvider.get_world().tick(self._timeout)
+            
+            if record_traffic and sync_obj.sumo.player_has_result(): 
+                state, player_ind = sync_obj.get_state()
+                # print(state)
+                state = np.array(state)
+                # print(state)
+                avg_vel = state[1::2].mean().squeeze()
+                # print(avg_vel)
+                self.scenario_traffic_info.append(avg_vel)
 
             # sync_obj.tick()
+
+    def save_traffic_info_scenario(self):
+        with open(self.traffic_info_csv, 'a+') as f_object:
+            writer_object = writer(f_object)
+            writer_object.writerow(self.scenario_traffic_info)
+        
+        self.scenario_traffic_info = []
+        
 
     def run_tick_cosim_rl(self, sync_obj, action):
         """
         Trigger the start of the scenario and wait for it to finish/fail
         """
 
-        self._watchdog.start()
+        # self._watchdog.start()
         self._running = True
 
         while self._running:
@@ -311,11 +347,13 @@ class ScenarioManager(object):
             try:
                 if timestamp:
                     # print("Timestamp exists, using action ", action)
-                    rgb, state, player_ind, done = self.tick_cosim_scenario_rl(timestamp, sync_obj, action)
-                    return rgb, state, player_ind, done
+                    result = self.tick_cosim_scenario_rl(timestamp, sync_obj, action)
+                    return result
 
             except:
-                break
+                print("Exception at cosim tick")
+                self._running = False 
+                raise
                 # self._tick_scenario(timestamp)
 
 
@@ -325,7 +363,7 @@ class ScenarioManager(object):
         """ 
         if self._running:
 
-            self._watchdog.update()
+            # self._watchdog.update()
             # Update game time and actor information
             GameTime.on_carla_tick(timestamp)
             CarlaDataProvider.on_carla_tick()
@@ -334,7 +372,7 @@ class ScenarioManager(object):
                 # print("Number of ego vehicles: ", len(self.ego_vehicles))
                 ticked_sync = False 
                 if not sync_obj.sumo.player_id:
-                    print("Adding ego vehicles to SUMO.. ")
+                    print("1 Adding ego vehicles to SUMO.. ")
                     carla_actor = self.ego_vehicles[0]
                     id = carla_actor.id
                     type_id = BridgeHelper.get_sumo_vtype(carla_actor)
@@ -363,17 +401,26 @@ class ScenarioManager(object):
                         sync_obj.sumo.tick()
                 #         sync_obj.tick()
 
-                ego_action, rgb, state, player_ind = self._agent._agent.forward_step(action)
+                ego_action, img, state, start_player_ind, fuel_consumption = self._agent._agent.forward_step(action)
+                if state is not None:
+                    next_obs, player_ind = sync_obj.get_state()
+                else: 
+                    next_obs, player_ind, fuel_consumption = None, None, None
 
             # Special exception inside the agent that isn't caused by the agent
             except SensorReceivedNoData as e:
+                self._running = False 
                 raise RuntimeError(e)
 
             except Exception as e:
-                raise AgentError(e)
+                self._running = False 
+                raise AgentError(e) 
+            
+            except: 
+                raise
 
             self.ego_vehicles[0].apply_control(ego_action)
-
+            
             # Tick scenario
             self.scenario_tree.tick_once()
 
@@ -391,10 +438,10 @@ class ScenarioManager(object):
             spectator.set_transform(carla.Transform(ego_trans.location + carla.Location(z=50),
                                                         carla.Rotation(pitch=-90)))
 
-        if self._running and self.get_running_status():
+        if self._running:
             
             if sync_obj.sumo.player_has_result() == False: 
-                print("Adding ego vehicles to SUMO.. ")
+                print("2 Adding ego vehicles to SUMO.. ")
                 carla_actor = self.ego_vehicles[0]
                 id = carla_actor.id
                 type_id = BridgeHelper.get_sumo_vtype(carla_actor)
@@ -427,10 +474,12 @@ class ScenarioManager(object):
                 sync_obj.tick()
             else:
                 CarlaDataProvider.get_world().tick(self._timeout)
+            
 
             # sync_obj.tick()
 
-        return rgb, state, player_ind, not self._running
+        # return img, state, player_ind, not self._running
+        return img, next_obs, player_ind, not self._running, state, start_player_ind, fuel_consumption
 
     def _tick_scenario(self, timestamp):
         """
@@ -488,7 +537,8 @@ class ScenarioManager(object):
         """
         This function triggers a proper termination of a scenario
         """
-        self._watchdog.stop()
+        if self._watchdog is not None:
+            self._watchdog.stop()
 
         self.end_system_time = time.time()
         self.end_game_time = GameTime.get_time()
